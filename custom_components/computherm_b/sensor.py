@@ -1,11 +1,6 @@
-"""Sensor platform for Computherm B integration.
-
-Multi-RF-sensor variant: each physical sensor is exposed as a separate
-Home Assistant device. The relay remains attached to the parent device.
-"""
+"""Sensor platform for Computherm B with separate physical RF devices."""
 from __future__ import annotations
 
-import logging
 import re
 from typing import Any
 
@@ -22,130 +17,84 @@ from .const import COORDINATOR, DOMAIN
 from .const import DeviceAttributes as DA
 from .coordinator import ComputhermDataUpdateCoordinator
 
-_LOGGER = logging.getLogger(__package__)
+
+def _safe(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(value or "").casefold()).strip("_")
 
 
-def _normal(value: Any) -> str:
-    """Return a stable comparison string."""
-    return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
-
-
-def _sensor_id(device_data: dict, sensor_key: str, sensor_info: dict) -> str:
-    """Resolve the real physical sensor id without hard-coding sensor_key.
-
-    Priority:
-    1. explicit id/channel fields already present in the WebSocket reading;
-    2. the matching record returned by /sensors;
-    3. the numeric part of sensor_key;
-    4. sensor field, then sensor_key itself.
-    """
+def _physical_id(sensor_key: str, info: dict) -> str:
     for field in ("physical_sensor_id", "sensor_id", "channel", "id"):
-        value = sensor_info.get(field)
-        if value not in (None, ""):
-            return str(value)
-
-    src = _normal(sensor_info.get("src"))
-    kind = _normal(sensor_info.get("type"))
-    name = _normal(sensor_info.get("name"))
-    metadata = device_data.get("sensor_metadata", []) or []
-
-    candidates = []
-    for item in metadata:
-        if src and _normal(item.get("src")) != src:
-            continue
-        if kind and _normal(item.get("type")) != kind:
-            continue
-        item_name = _normal(item.get("name"))
-        score = 2 if name and item_name == name else 1
-        candidates.append((score, item))
-    if candidates:
-        candidates.sort(key=lambda value: value[0], reverse=True)
-        item = candidates[0][1]
-        for field in ("physical_sensor_id", "sensor_id", "channel", "id", "sensor"):
-            value = item.get(field)
-            if value not in (None, ""):
-                return str(value)
-
-    match = re.search(r"(?:^|_)(\d+)$", sensor_key)
-    if match:
-        return match.group(1)
-    value = sensor_info.get("sensor")
-    return str(value if value not in (None, "") else sensor_key)
+        if info.get(field) not in (None, ""):
+            return str(info[field])
+    parts = sensor_key.split("_")
+    if len(parts) > 1 and parts[1].isdigit():
+        return parts[1]
+    return str(info.get("sensor", sensor_key))
 
 
-def _sensor_name(sensor_id: str, sensor_info: dict) -> str:
-    """Prefer cloud name, with stable Italian fallbacks for ids 1..4."""
-    cloud_name = str(sensor_info.get("name") or "").strip()
-    if cloud_name:
-        return cloud_name
-    return {
-        "1": "Sensore principale",
-        "2": "Camera",
-        "3": "Cucina",
-        "4": "Cameretta",
-    }.get(sensor_id, f"Sensore {sensor_id}")
+def _device_key(sensor_key: str, info: dict) -> str:
+    src = str(info.get("src") or sensor_key.split("_", 1)[0]).lower()
+    return f"{src}_{_physical_id(sensor_key, info)}"
 
 
-async def async_setup_entry(
-    hass: HomeAssistant,
-    config_entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
-) -> None:
-    """Set up Computherm sensors."""
+def _device_name(sensor_key: str, info: dict) -> str:
+    name = str(info.get("name") or "").strip()
+    if name:
+        return name
+    sid = _physical_id(sensor_key, info)
+    return {"1": "Sensore principale", "2": "Sensore 2", "3": "Sensore 3", "4": "Sensore 4"}.get(sid, f"Sensore {sid}")
+
+
+async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry,
+                            async_add_entities: AddEntitiesCallback) -> None:
     coordinator: ComputhermDataUpdateCoordinator = hass.data[DOMAIN][config_entry.entry_id][COORDINATOR]
     await coordinator.async_config_entry_first_refresh()
     existing: set[str] = set()
 
     @callback
-    def add_for_device(serial: str) -> None:
+    def add_entities(serial: str) -> None:
         if not coordinator.devices_with_base_info.get(serial):
             return
         data = coordinator.device_data.get(serial, {})
         readings = data.get(DA.SENSOR_READINGS, {}) or {}
-        entities: list = []
+        new: list = []
 
-        relay_uid = f"{serial}:relay"
-        if relay_uid not in existing:
-            entities.append(ComputhermRelaySensor(coordinator, serial))
-            existing.add(relay_uid)
+        uid = f"{serial}:relay"
+        if uid not in existing:
+            new.append(ComputhermRelaySensor(coordinator, serial))
+            existing.add(uid)
 
-        for key, info in readings.items():
+        for sensor_key, info in readings.items():
             kind = str(info.get("type") or "").upper()
             if kind not in ("TEMPERATURE", "HUMIDITY"):
                 continue
-            sid = _sensor_id(data, str(key), info)
-            name = _sensor_name(sid, info)
-            uid = f"{serial}:{sid}:{kind.lower()}:{key}"
-            if uid not in existing:
-                entities.append(ComputhermReadingSensor(coordinator, serial, str(key), sid, name, kind))
-                existing.add(uid)
-
+            tracking = f"{serial}:{sensor_key}:{kind}"
+            if tracking not in existing:
+                new.append(ComputhermReadingSensor(coordinator, serial, sensor_key, info, kind))
+                existing.add(tracking)
             if kind == "TEMPERATURE" and "battery" in info:
-                battery_uid = f"{serial}:{sid}:battery:{key}"
-                if battery_uid not in existing:
-                    entities.append(ComputhermBatterySensor(coordinator, serial, str(key), sid, name))
-                    existing.add(battery_uid)
-
-        if entities:
-            async_add_entities(entities, True)
+                tracking = f"{serial}:{sensor_key}:BATTERY"
+                if tracking not in existing:
+                    new.append(ComputhermBatterySensor(coordinator, serial, sensor_key, info))
+                    existing.add(tracking)
+        if new:
+            async_add_entities(new, True)
 
     for serial in coordinator.devices:
-        add_for_device(serial)
+        add_entities(serial)
 
     @callback
-    def handle_update() -> None:
+    def update() -> None:
         for serial in coordinator.devices:
-            add_for_device(serial)
+            add_entities(serial)
 
-    config_entry.async_on_unload(coordinator.async_add_listener(handle_update))
+    config_entry.async_on_unload(coordinator.async_add_listener(update))
 
 
-class ComputhermEntityBase(CoordinatorEntity):
-    """Common parent-device handling."""
-
+class Base(CoordinatorEntity):
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator: ComputhermDataUpdateCoordinator, serial: str) -> None:
+    def __init__(self, coordinator, serial: str) -> None:
         super().__init__(coordinator)
         self.serial = serial
 
@@ -158,13 +107,12 @@ class ComputhermEntityBase(CoordinatorEntity):
         return bool(self.device_data.get(DA.ONLINE, False))
 
 
-class ComputhermRelaySensor(ComputhermEntityBase, BinarySensorEntity):
-    """Existing relay entity, kept on the parent Computherm device."""
-
+class ComputhermRelaySensor(Base, BinarySensorEntity):
+    """Original relay presentation and unique id."""
     _attr_device_class = BinarySensorDeviceClass.RUNNING
-    _attr_name = "Relè"
+    _attr_translation_key = "relay"
 
-    def __init__(self, coordinator: ComputhermDataUpdateCoordinator, serial: str) -> None:
+    def __init__(self, coordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
         self._attr_unique_id = f"{DOMAIN}_{serial}_relay"
         device = coordinator.devices[serial]
@@ -180,35 +128,24 @@ class ComputhermRelaySensor(ComputhermEntityBase, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool | None:
-        state = self.device_data.get(DA.RELAY_STATE)
-        return state if state is not None else None
+        return self.device_data.get(DA.RELAY_STATE)
 
     @property
     def icon(self) -> str:
         return "mdi:electric-switch-closed" if self.is_on else "mdi:electric-switch"
 
 
-class ComputhermRFBase(ComputhermEntityBase):
-    """Base for entities belonging to an individual RF sensor device."""
-
-    def __init__(
-        self,
-        coordinator: ComputhermDataUpdateCoordinator,
-        serial: str,
-        sensor_key: str,
-        sensor_id: str,
-        sensor_name: str,
-    ) -> None:
+class RFBase(Base):
+    def __init__(self, coordinator, serial: str, sensor_key: str, info: dict) -> None:
         self.sensor_key = sensor_key
-        self.sensor_id = sensor_id
-        self.sensor_name = sensor_name
+        self.physical_id = _physical_id(sensor_key, info)
+        self.rf_device_key = _device_key(sensor_key, info)
         super().__init__(coordinator, serial)
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, f"{serial}_rf_sensor_{sensor_id}")},
-            "name": sensor_name,
+            "identifiers": {(DOMAIN, f"{serial}_{self.rf_device_key}")},
+            "name": _device_name(sensor_key, info),
             "manufacturer": "ProSmart / Computherm",
             "model": "BBoil RF sensor",
-            "via_device": (DOMAIN, serial),
         }
 
     @property
@@ -216,16 +153,15 @@ class ComputhermRFBase(ComputhermEntityBase):
         return self.device_data.get(DA.SENSOR_READINGS, {}).get(self.sensor_key, {})
 
 
-class ComputhermReadingSensor(ComputhermRFBase, SensorEntity):
-    """Temperature or humidity from one physical sensor."""
-
+class ComputhermReadingSensor(RFBase, SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    def __init__(self, coordinator, serial, sensor_key, sensor_id, sensor_name, kind) -> None:
+    def __init__(self, coordinator, serial, sensor_key, info, kind) -> None:
         self.kind = kind
-        super().__init__(coordinator, serial, sensor_key, sensor_id, sensor_name)
+        super().__init__(coordinator, serial, sensor_key, info)
         suffix = "temperature" if kind == "TEMPERATURE" else "humidity"
-        self._attr_unique_id = f"{DOMAIN}_{serial}_rf_{sensor_id}_{suffix}"
+        # sensor_key is included so two sources can never get the same unique id.
+        self._attr_unique_id = f"{DOMAIN}_{serial}_{_safe(sensor_key)}_{suffix}"
         self._attr_name = "Temperatura" if kind == "TEMPERATURE" else "Umidità"
         if kind == "TEMPERATURE":
             self._attr_device_class = SensorDeviceClass.TEMPERATURE
@@ -250,29 +186,26 @@ class ComputhermReadingSensor(ComputhermRFBase, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return {"sensor_key": self.sensor_key, "sensor_id": self.sensor_id, "source": self.reading.get("src")}
+        return {"sensor_key": self.sensor_key, "sensor_id": self.physical_id,
+                "source": self.reading.get("src")}
 
 
-class ComputhermBatterySensor(ComputhermRFBase, SensorEntity):
-    """Battery level for one physical sensor."""
-
+class ComputhermBatterySensor(RFBase, SensorEntity):
     _attr_device_class = SensorDeviceClass.BATTERY
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:battery"
     _attr_name = "Batteria"
 
-    def __init__(self, coordinator, serial, sensor_key, sensor_id, sensor_name) -> None:
-        super().__init__(coordinator, serial, sensor_key, sensor_id, sensor_name)
-        self._attr_unique_id = f"{DOMAIN}_{serial}_rf_{sensor_id}_battery"
+    def __init__(self, coordinator, serial, sensor_key, info) -> None:
+        super().__init__(coordinator, serial, sensor_key, info)
+        self._attr_unique_id = f"{DOMAIN}_{serial}_{_safe(sensor_key)}_battery"
 
     @property
     def native_value(self) -> float | None:
         value = self.reading.get("battery")
-        if value is None:
-            return None
         try:
-            return float(str(value).replace("%", "").strip())
+            return float(str(value).replace("%", "").strip()) if value is not None else None
         except (TypeError, ValueError):
             return None
 
