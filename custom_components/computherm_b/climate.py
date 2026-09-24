@@ -279,13 +279,6 @@ class ComputhermThermostat(CoordinatorEntity, ClimateEntity):
         """Return if entity is available."""
         return self.device_data.get(DA.ONLINE, False)
 
-    @property
-    def current_humidity(self) -> int | None:
-        """Return the current humidity."""
-        if self.device_data.get(DA.HUMIDITY) is not None:
-            return round(float(self.device_data[DA.HUMIDITY]))
-        return None
-
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
         temperature = kwargs.get(ATTR_TEMPERATURE)
