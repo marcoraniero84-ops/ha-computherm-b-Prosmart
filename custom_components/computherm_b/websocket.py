@@ -110,9 +110,8 @@ class WebSocketMessageHandler:
             sensor_num = reading.get("sensor", 1)
             reading_type = reading.get("type", "").upper()
 
-            # Keep ONBOARD and RELAY keys backward-compatible.
-            # REMOTE transmitters may all report sensor=1, therefore their
-            # real cloud reading id is required to avoid overwriting them.
+            # Preserve original ONBOARD/RELAY keys. REMOTE units can all
+            # report sensor=1, so use the cloud reading id and measurement type.
             if src == "ONBOARD":
                 sensor_key = f"{src}_{reading_type}"
             elif src == "REMOTE":
@@ -178,8 +177,6 @@ class WebSocketMessageHandler:
             elif reading["type"] == WSC.Events.HUMIDITY:
                 reading_value = None if reading["reading"] == "N/A" else reading["reading"]
                 device_update[DA.SENSOR_READINGS][sensor_key]["reading"] = reading_value
-                # Retained for backward compatibility; climate.py intentionally
-                # no longer exposes humidity on the relay/thermostat interface.
                 device_update[DA.HUMIDITY] = reading_value
 
             elif reading["type"] == WSC.Events.TARGET_TEMPERATURE:
