@@ -204,12 +204,11 @@ class ComputhermRFBase(ComputhermEntityBase):
         self.sensor_name = sensor_name
         super().__init__(coordinator, serial)
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, f"{serial}_rf_sensor_{sensor_id}")},
-            "name": sensor_name,
-            "manufacturer": "ProSmart / Computherm",
-            "model": "BBoil RF sensor",
-            "via_device": (DOMAIN, serial),
-        }
+"identifiers": {(DOMAIN, f"{serial}_rf_sensor_{sensor_id}")},
+"name": sensor_name,
+"manufacturer": "ProSmart / Computherm",
+"model": "BBoil RF sensor",
+}
 
     @property
     def reading(self) -> dict:
