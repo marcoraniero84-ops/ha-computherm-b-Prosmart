@@ -58,9 +58,11 @@ async def async_setup_entry(
             return
 
         _LOGGER.info("[%s] Creating climate entity", device_id)
+        # Reserve before adding: coordinator callbacks can be re-entrant while
+        # Home Assistant is registering the entity.
+        existing_entities.add(device_id)
         entity = ComputhermThermostat(coordinator, device_id)
         async_add_entities([entity], True)
-        existing_entities.add(device_id)
         _LOGGER.info("[%s] Climate entity created", device_id)
 
     # Add entities for devices that already have base_info
