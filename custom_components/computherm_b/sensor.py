@@ -224,7 +224,12 @@ class ComputhermReadingSensor(ComputhermRFBase, SensorEntity):
         self.kind = kind
         super().__init__(coordinator, serial, sensor_key, sensor_id, sensor_name)
         suffix = "temperature" if kind == "TEMPERATURE" else "humidity"
-        self._attr_unique_id = f"{DOMAIN}_{serial}_rf_{sensor_id}_{suffix}"
+        safe_key = re.sub(
+            r"[^a-zA-Z0-9_]",
+            "_",
+            str(sensor_key),
+        )
+        self._attr_unique_id = f"{DOMAIN}_{serial}_{safe_key}_{suffix}"
         self._attr_name = "Temperatura" if kind == "TEMPERATURE" else "Umidità"
         if kind == "TEMPERATURE":
             self._attr_device_class = SensorDeviceClass.TEMPERATURE
@@ -263,7 +268,12 @@ class ComputhermBatterySensor(ComputhermRFBase, SensorEntity):
 
     def __init__(self, coordinator, serial, sensor_key, sensor_id, sensor_name) -> None:
         super().__init__(coordinator, serial, sensor_key, sensor_id, sensor_name)
-        self._attr_unique_id = f"{DOMAIN}_{serial}_rf_{sensor_id}_battery"
+        safe_key = re.sub(
+            r"[^a-zA-Z0-9_]",
+            "_",
+            str(sensor_key),
+        )
+        self._attr_unique_id = f"{DOMAIN}_{serial}_{safe_key}_battery"
 
     @property
     def native_value(self) -> float | None:
