@@ -110,12 +110,15 @@ class WebSocketMessageHandler:
             sensor_num = reading.get("sensor", 1)
             reading_type = reading.get("type", "").upper()
 
-            # For ONBOARD sensors, use src_type as key (e.g., ONBOARD_TEMPERATURE, ONBOARD_HUMIDITY)
-            # For RELAY/REMOTE sensors, use src_sensornumber combination (e.g., RELAY_1, RELAY_2)
+            # Keep ONBOARD and RELAY keys backward-compatible.
+            # REMOTE transmitters may all report sensor=1, therefore their
+            # real cloud reading id is required to avoid overwriting them.
             if src == "ONBOARD":
                 sensor_key = f"{src}_{reading_type}"
+            elif src == "REMOTE":
+                physical_sensor_id = reading.get("id", sensor_num)
+                sensor_key = f"{src}_{physical_sensor_id}_{reading_type}"
             else:
-                # Use sensor number for RELAY and REMOTE sensors
                 sensor_key = f"{src}_{sensor_num}"
 
             # Initialize sensor entry if not exists
@@ -126,7 +129,11 @@ class WebSocketMessageHandler:
             sensor_metadata = {
                 "src": src.lower(),
                 "type": reading.get("type"),
+                "sensor": reading.get("sensor"),
             }
+            if reading.get("id") is not None:
+                sensor_metadata["id"] = reading.get("id")
+                sensor_metadata["physical_sensor_id"] = reading.get("id")
 
             # Only update name if it's present in the reading AND not empty
             if "name" in reading:
@@ -170,6 +177,9 @@ class WebSocketMessageHandler:
 
             elif reading["type"] == WSC.Events.HUMIDITY:
                 reading_value = None if reading["reading"] == "N/A" else reading["reading"]
+                device_update[DA.SENSOR_READINGS][sensor_key]["reading"] = reading_value
+                # Retained for backward compatibility; climate.py intentionally
+                # no longer exposes humidity on the relay/thermostat interface.
                 device_update[DA.HUMIDITY] = reading_value
 
             elif reading["type"] == WSC.Events.TARGET_TEMPERATURE:
