@@ -110,8 +110,6 @@ class WebSocketMessageHandler:
             sensor_num = reading.get("sensor", 1)
             reading_type = reading.get("type", "").upper()
 
-            # Preserve original ONBOARD/RELAY keys. REMOTE units can all
-            # report sensor=1, so use the cloud reading id and measurement type.
             if src == "ONBOARD":
                 sensor_key = f"{src}_{reading_type}"
             elif src == "REMOTE":
