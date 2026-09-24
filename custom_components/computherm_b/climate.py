@@ -146,9 +146,13 @@ class ComputhermThermostat(CoordinatorEntity, ClimateEntity):
 
     def _setup_entity_info(self) -> None:
         """Set up entity ID and name."""
-        entity_name = self.coordinator.device_data[self.serial_number].get(
-            "base_info", {}).get("name", "thermostat")
-        self._attr_unique_id = f"{DOMAIN}_{self.serial_number}_{entity_name}"
+        entity_name = (
+            self.coordinator.device_data[self.serial_number]
+            .get("base_info", {})
+            .get("name")
+            or "thermostat"
+        )
+        self._attr_unique_id = f"{DOMAIN}_{self.serial_number}_thermostat"
         self._attr_name = entity_name
         _LOGGER.info(
             "[%s] Initializing climate entity - ID: %s",
