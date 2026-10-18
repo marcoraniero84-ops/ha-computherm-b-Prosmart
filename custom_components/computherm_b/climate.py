@@ -203,12 +203,28 @@ class ComputhermThermostat(CoordinatorEntity, ClimateEntity):
 
     @property
     def current_temperature(self) -> float | None:
-        """Return the current temperature."""
-        # Use current_temperature which is determined from the controlling sensor
+        """Return the average temperature of the four room sensors."""
+        readings = self.device_data.get(DA.SENSOR_READINGS, {}) or {}
+        temperatures: list[float] = []
+
+        for sensor_info in readings.values():
+            if str(sensor_info.get("type") or "").upper() != "TEMPERATURE":
+                continue
+
+            value = sensor_info.get("reading")
+            try:
+                if value is not None:
+                    temperatures.append(float(value))
+            except (TypeError, ValueError):
+                continue
+
+        if temperatures:
+            return round(sum(temperatures) / len(temperatures), 2)
+
+        # Keep the original value as a fallback while sensor readings load.
         if self.device_data.get(DA.CURRENT_TEMPERATURE) is not None:
             return float(self.device_data[DA.CURRENT_TEMPERATURE])
-        # Fallback to DA.TEMPERATURE for backward compatibility
-        elif self.device_data.get(DA.TEMPERATURE) is not None:
+        if self.device_data.get(DA.TEMPERATURE) is not None:
             return float(self.device_data[DA.TEMPERATURE])
         return None
 
