@@ -79,10 +79,10 @@ def _sensor_name(sensor_id: str, sensor_info: dict) -> str:
     if cloud_name:
         return cloud_name
     return {
-        "1": "Sensore principale",
-        "2": "Camera",
-        "3": "Cucina",
-        "4": "Cameretta",
+        "1": "Camera",
+        "2": "Cucina",
+        "3": "Cameretta",
+        "4": "Corridoio",
     }.get(sensor_id, f"Sensore {sensor_id}")
 
 
